@@ -1,182 +1,153 @@
-# financial-platform
+# 🛡️ Financial Platform: 금융권 생성형 AI 사용 통제 플랫폼
+
+> 임직원이 사내에서 생성형 AI를 쓸 때 **민감정보가 외부 LLM으로 새어나가지 않도록** 탐지·차단하고,
+> 컴플라이언스 담당자가 위험 이벤트를 모니터링·조치할 수 있는 플랫폼
+
+**KT 에이블스쿨 9기 빅프로젝트** · 2026.07 ~ 2026.08 · 6인 팀
+**담당: DLP(Data Loss Prevention) 탐지·조치 도메인 전체 설계·구현**
+
+> 원본 저장소(팀 Organization): [klllj7/financial-platform](https://github.com/klllj7/financial-platform)
+> 이 저장소는 커밋 기록을 유지한 미러이며, 아래 내용은 제가 담당한 DLP 파트를 중심으로 정리했습니다.
+
+<!-- 📸 대표 이미지: 위험 이벤트 관리 화면 또는 AI 채팅에서 마스킹/차단되는 장면 캡처 -->
 
 ---
-# ERD
-```mermaid
-erDiagram
-    Department {
-        serial id PK
-        text name
-        text description
-        timestamp created_at
-    }
-    RoleInfo {
-        serial id PK
-        text name
-        text description
-        timestamp created_at
-    }
-    UserInfo {
-        serial id PK
-        serial department_id FK
-        serial role_id FK
-        text login_id "UNIQUE"
-        text password_hash 
-        text name
-        text email
-        timestamp created_at
-        timestamp updated_at
-    }
-    LoginHistory {
-        serial id PK 
-        serial user_id FK
-        timestamp attempt_time
-        boolean success_yn
-        text fail_reason
-        text ip_addr
-    }
-    PolicyInfo {
-        serial id PK
-        serial department_id FK
-        text name
-        jsonb rule_content
-        integer version
-        boolean active_yn
-        timestamp created_at
-        timestamp updated_at
-    }
-    PolicyHistory {
-        serial id PK 
-        serial policy_id FK
-        integer version
-        jsonb rule_snapshot
-        timestamp updated_at
-    }
-    AIToolInfo {
-        serial id PK
-        text model_name
-        text platform
-        boolean approved_yn
-        timestamp created_at
-    }
-    UsageLog {
-        serial id PK
-        serial user_id FK
-        serial ai_tool_id FK
-        serial policy_id FK "NULL 허용"
-        timestamp event_time
-        text description
-        text risk_grade 
-        text action_status 
-        integer toekn_usage
-        numeric cost 
-    }
-    EventLog {
-        serial id PK
-        serial event_id FK
-        text detection_type 
-        boolean masked_yn
-        text grade
-        timestamp created_at
-    }
-    ActionHistory {
-        serial id PK
-        serial event_id FK
-        serial actor_user_id FK
-        text action_type
-        text action_reason
-        timestamp action_time
-    }
-    RegulationDocument {
-        serial id PK 
-        text doc_name
-        date revised_at
-    }
-    RegulationClause {
-        serial id PK
-        serial doc_id FK
-        text clause_no
-        text title
-        text description
-    }
-    EventClauseMap {
-        serial id PK
-        serial event_id FK
-        serial clause_id FK
-        integer grade
-    }
-    EvidenceFile {
-        serial id PK
-        serial report_id FK
-        serial event_id FK "NULL 허용"
-        text file_name
-        text file_type
-        text file_path
-        serial uploaded_by FK
-        timestamp created_at
-    }
-    ReportInfo {
-        serial id PK
-        serial department_id FK 
-        text report_name
-        text purpose_type "상시평가/리포트"
-        date period_start 
-        date period_end 
-        timestamp created_at
-    }
-    ReportLogMap {
-        serial report_id PK 
-        serial event_id PK
-    }
-    AnalysisJob {
-        serial id PK 
-        serial event_id FK
-        timestamp requested_at
-        timestamp finished_at
-    }
-    AgentLog {
-        serial id PK 
-        serial job_id FK
-        text step_name
-        text status
-        text input
-        text output
-        text fail_reason "NULL 가능"
-        timestamp started_at
-        timestamp ended_at
-    }
-    PromptStorage {
-        serial id PK
-        serial event_id FK "UNIQUE 1to1"
-        text original_prompt
-        text masked_prompt
-        text encrypted_prompt
-        timestamp expires_at
-        timestamp created_at
-    }
 
-    Department ||--o{ UserInfo : "소속"
-    RoleInfo ||--o{ UserInfo : "역할부여"
-    UserInfo ||--o{ LoginHistory : "로그인시도"
-    Department ||--o{ PolicyInfo : "부서별정책"
-    PolicyInfo ||--o{ PolicyHistory : "변경이력"
-    UserInfo ||--o{ UsageLog : "AI사용"
-    AIToolInfo ||--o{ UsageLog : "사용도구"
-    PolicyInfo |o--o{ UsageLog : "적용정책"
-    UsageLog ||--o{ EventLog : "이슈탐지로그"
-    UsageLog ||--o{ ActionHistory : "조치이력"
-    UserInfo ||--o{ ActionHistory : "조치수행자"
-    UsageLog ||--o{ EventClauseMap : "규제매핑"
-    RegulationClause ||--o{ EventClauseMap : "관련조항"
-    RegulationDocument ||--o{ RegulationClause : "조항포함"
-    UsageLog ||--o{ EvidenceFile : "증빙파일"
-    UserInfo ||--o{ EvidenceFile : "업로드"
-    UserInfo ||--o{ ReportInfo : "생성자"
-    Department |o--o{ ReportInfo : "대상부서"
-    ReportInfo ||--o{ ReportLogMap : "리포트 매핑"
-    UsageLog ||--o{ ReportLogMap : "로그 매핑"
-    UsageLog ||--o{ AnalysisJob : "분석요청"
-    AnalysisJob ||--o{ AgentLog : "AI Agent 실행로그"
-    UsageLog ||--|| PromptStorage : "프롬프트 보관"
+## 1. 문제 정의
+
+금융권에서 생성형 AI 도입의 가장 큰 걸림돌은 **보안**입니다.
+직원이 고객 계좌번호, 주민번호, 사내 기밀을 프롬프트에 그대로 넣으면 그 순간 외부 LLM 제공자에게 전송됩니다.
+
+그래서 **프롬프트가 외부 LLM에 도달하기 전 마지막 관문**으로 DLP 계층을 만들었습니다.
+
+- 정형화된 개인정보(주민번호, 계좌·카드번호 등)는 **마스킹하거나 차단**
+- 표현만 바꾼 기밀 요청(예: "전 직원 연봉 테이블 정리해줘")도 **의미 기반으로 탐지**
+- 프롬프트 인젝션·탈옥 시도 차단
+- 모든 탐지 결과를 감사 로그로 남겨 컴플라이언스 담당자가 조치
+
+---
+
+## 2. 아키텍처
+
 ```
+브라우저 (React)
+  └→ Node.js API (Express)  ── AI 채팅 요청
+        ① 입력 검사   → DLP 서비스 (FastAPI)  direction="input"
+        │               ├ 정규식 탐지: PII 5종 + 프롬프트 인젝션
+        │               └ 임베딩 유사도 탐지: 기밀 카테고리 4종
+        │               → allowed / masked / blocked 판정
+        ② blocked면 LLM 호출 생략, 아니면 마스킹본만 LLM(Solar)에 전달
+        ③ 응답 검사   → DLP 서비스        direction="output"
+        └→ usage_log / event_log / action_history 기록
+                                  ↓
+                     컴플라이언스 담당자 "위험 이벤트 관리" 화면
+```
+
+**핵심 설계 결정**
+- **임베딩을 로컬에서만 계산**: `fastembed` + `multilingual-e5-large`. 민감정보를 검사하려고 외부 API로 보내면 DLP의 목적과 모순되기 때문입니다.
+- **입력과 출력 양방향 검사**: LLM이 참조 데이터를 그대로 뱉거나 환각으로 민감정보를 만들어내는 경우까지 막습니다.
+- **판정 3단계**: 의미가 살아 있는 정보는 마스킹하고, 마스킹해도 위험한 유형(주민번호, 인젝션, 기밀 유사도)은 항상 차단합니다.
+
+📄 [ERD 보기](docs/ERD.md)
 ---
+
+## 3. 기술 스택
+
+| 영역 | 기술 |
+|---|---|
+| DLP 서비스 (담당) | Python, FastAPI, SQLAlchemy, fastembed (multilingual-e5-large), 정규식, unittest |
+| Backend | Node.js, Express, Sequelize |
+| Frontend | React, Vite |
+| DB / Infra | PostgreSQL (Neon), Docker, AWS ECS·ECR, GitHub Actions |
+| LLM | Upstage Solar |
+
+---
+
+## 4. 내가 한 일
+
+### ① DLP 탐지 엔진 구현
+- PII 정규식 탐지(주민번호, 휴대폰, 계좌, 카드, 이메일) 및 마스킹
+- 프롬프트 인젝션·탈옥 탐지 (한/영 패턴)
+- 겹치는 탐지 중 더 구체적인 매칭만 채택하는 중복 제거 로직
+- 임베딩 유사도 기반 기밀 탐지: 기밀문서, 고객금융정보, 인사정보, 미공개 회사정보
+
+### ② 게이트웨이 API와 AI 채팅 연동
+- `POST /gateway/chat`: 검사 → 판정 → 로그 적재를 한 번에 처리
+- AI 채팅이 실제로 DLP를 거치도록 Node 서비스와 연동, 사용자 입력과 AI 응답을 각각 검사
+
+### ③ 위험 이벤트 관리 화면
+- 부서·기간·등급·조치상태 필터, 반복 위반자 배지
+- 상세 모달: 유사도 점수, 원문/마스킹 토글, 탐지 위치(입력/응답), 조치 이력
+- 담당자 조치(확인 / 상급 보고 / 오탐 처리) 기능
+
+### ④ 공유 DB 전환 및 스키마 관리 정리
+- 팀원 각자의 로컬 DB를 공유 DB(Neon)로 전환
+- 서버 기동 시 자동 스키마 변경(`sync({ alter: true })`) 때문에 **unique 제약이 50개 넘게 중복 생성된 사고**를 발견하고, 마이그레이션 기반 관리로 전환·문서화
+
+---
+
+## 5. 트러블슈팅
+
+### 🔥 "dddd"만 입력해도 차단되는 오탐 문제
+
+**현상**: 의미 없는 입력에도 "민감한 내용이 포함되어 표시할 수 없습니다"가 떴습니다.
+
+**원인 분석**: 입력이 아니라 **AI 응답 검사**에서 걸리고 있었습니다. 임베딩 유사도를 실측해 보니,
+`multilingual-e5`는 **서로 관계없는 문장끼리도 코사인 유사도가 0.78~0.86**으로 나왔습니다.
+유사도의 바닥이 0이 아니라 0.8 근처인데 임계값이 0.86이라서, 노이즈와 0.03밖에 차이가 나지 않았습니다.
+심지어 "죄송합니다. 입력하신 내용을 이해하지 못했습니다."(0.944)가 실제 민감 요청(0.933)보다 점수가 높았습니다.
+→ **임계값을 조정해서는 해결할 수 없는 구조적 문제**였습니다.
+
+**해결**: 절대 임계값 대신 **정상 대화 앵커 대비 마진** 방식으로 바꿨습니다.
+민감 카테고리 유사도가 기준 이상이면서, 동시에 정상 대화 문장과의 유사도보다 일정 이상 높아야 탐지합니다.
+평범한 문장은 양쪽에 비슷하게 붙어서 마진이 0 근처에 머물기 때문에 걸러집니다.
+
+**결과** (정상 28문장 / 민감 12문장 평가셋):
+
+| 방식 | 오탐 | 미탐 |
+|---|---|---|
+| 기존: 절대 임계값 0.86 | **8/28** | 0/12 |
+| 임계값만 올림 (0.90) | 1/28 | **4/12** |
+| 임계값만 올림 (0.92) | 1/28 | **5/12** |
+| **적용: 임계값 0.88 + 마진 0.02** | **0/28** | **0/12** |
+
+정상 문장의 최대 마진(+0.0089)과 민감 문장의 최소 마진(+0.0220)이 겹치지 않는 것을 확인하고, 그 사이 중앙값을 기준으로 잡았습니다.
+이 분리 조건 자체를 **회귀 테스트**로 만들어 참고 문장을 수정해도 안전 여유가 유지되는지 자동으로 확인하도록 했습니다.
+
+### 🔍 정규식 오탐 정밀화
+- 날짜(`2024-01-15`)를 계좌번호로, 긴 숫자열 중간을 주민번호로 잡는 문제 → 숫자 경계 + 값 유효성 검증(생년월일, 자릿수) 추가
+- "jailbreak 방지 기능 설명해줘" 같은 정상 질문이 차단되는 문제 → 명령형 표현일 때만 탐지
+- 단, **인젝션 패턴은 완화하지 않았습니다.** 미탐 피해가 오탐보다 크기 때문에 명백히 틀린 패턴만 좁히고, `disregard the above rules` 같은 변형은 오히려 탐지를 강화했습니다.
+
+### 📊 사용 이력이 2배로 집계되던 문제
+- 입력·응답 검사 때마다 사용 로그가 새로 생겨 **대화 1건이 2건으로 기록**되고, AI 응답이 사용자 프롬프트처럼 저장되고 있었습니다.
+- `direction`(input/output) 파라미터를 도입해 사용 로그는 입력 때만 만들고, 응답 탐지는 같은 로그에 연결되도록 수정했습니다.
+- 로그를 남기지 못하는 상황에서도 **차단·마스킹 판정은 그대로 수행**하도록 해서, 기록 실패가 보호 해제로 이어지지 않게 했습니다.
+
+### ✅ 테스트
+정규식 탐지, 임베딩 탐지, 게이트웨이 로깅에 대해 **테스트 36개**를 작성했습니다. (SQLite 인메모리 DB로 Postgres 없이 실행)
+
+---
+
+## 6. 한계와 개선 방향
+
+프로젝트 후반에 DLP 계층을 직접 점검해서 **보안 이슈 12건**을 정리했습니다. 주요 항목은 다음과 같습니다.
+
+| 이슈 | 내용 | 개선 방향 |
+|---|---|---|
+| 멀티턴 우회 | 1턴에서 막은 원문이 대화 이력을 통해 2턴에서 LLM으로 전달될 수 있음 | 대화 이력에 마스킹본만 저장 |
+| 응답 지연 | 임베딩 추론이 채팅 1건당 **약 6초** (실측) | 경량 모델(e5-small) 전환, 추론 워커 분리 |
+| 긴 입력 | 512토큰 초과분이 잘려 의미 검사 누락 | 청크 분할 후 최대 점수로 판정 |
+| 정규식 우회 | 전각 문자·제로폭 문자 등으로 우회 가능 | 입력 정규화(NFKC 등) 파이프라인 |
+
+<!-- TODO: 이 중 실제로 반영한 항목이 있으면 "개선 완료"로 옮기기 -->
+
+---
+
+## 7. 회고
+
+<!-- TODO: 직접 작성. 예시 방향
+- 임계값을 "조정"하는 게 아니라, 왜 안 되는지 데이터로 증명하고 구조를 바꾼 경험
+- 정확도 하나가 아니라 오탐/미탐의 비용 차이를 고려해 판단한 경험
+- 6인 팀에서 공유 DB·병합 과정의 회귀 문제를 겪으며 배운 협업 방식
+-->
