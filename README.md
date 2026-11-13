@@ -1,54 +1,65 @@
-# 🛡️ Financial Platform: 금융권 생성형 AI 사용 통제 플랫폼
+# 🛡️ ReguPilot: 금융권 생성형 AI 활용 모니터링 및 규제 증빙 자동화 플랫폼
 
-> 임직원이 사내에서 생성형 AI를 쓸 때 **민감정보가 외부 LLM으로 새어나가지 않도록** 탐지·차단하고,
-> 컴플라이언스 담당자가 위험 이벤트를 모니터링·조치할 수 있는 플랫폼
+> 금융사 임직원의 생성형 AI 사용에서 **민감정보 유출을 탐지·차단**하고,
+> 그 기록을 **규제 증빙자료와 내부결재 보고서**로까지 이어주는 플랫폼
 
-**KT 에이블스쿨 9기 빅프로젝트** · 2026.07 ~ 2026.08 · 6인 팀
-**담당: DLP(Data Loss Prevention) 탐지·조치 도메인 전체 설계·구현**
+**KT 에이블스쿨 9기 빅프로젝트 (AI 트랙 3반 7조)** · 2026.06.29 ~ 2026.08.21 (8주) · 5인 팀
+**역할: 팀장 / DLP 탐지·차단 엔진 및 AI 게이트웨이 설계·구현**
 
 > 원본 저장소(팀 Organization): [klllj7/financial-platform](https://github.com/klllj7/financial-platform)
 > 이 저장소는 커밋 기록을 유지한 미러이며, 아래 내용은 제가 담당한 DLP 파트를 중심으로 정리했습니다.
 
-<!-- 📸 대표 이미지: 위험 이벤트 관리 화면 또는 AI 채팅에서 마스킹/차단되는 장면 캡처 -->
+<!-- 📸 대표 이미지: 1P 사업 솔루션 소개서 이미지, 또는 AI 채팅에서 마스킹/차단되는 장면 캡처 -->
 
 ---
 
 ## 1. 문제 정의
 
-금융권에서 생성형 AI 도입의 가장 큰 걸림돌은 **보안**입니다.
-직원이 고객 계좌번호, 주민번호, 사내 기밀을 프롬프트에 그대로 넣으면 그 순간 외부 LLM 제공자에게 전송됩니다.
+**금융권 망분리 규제가 완화**되면서 금융사의 생성형 AI 활용이 빠르게 늘고 있습니다.
+하지만 직원이 고객 계좌번호, 주민번호, 사내 기밀을 프롬프트에 그대로 넣으면 그 순간 외부 LLM 제공자에게 전송됩니다.
 
-그래서 **프롬프트가 외부 LLM에 도달하기 전 마지막 관문**으로 DLP 계층을 만들었습니다.
+동시에 금융사는 **정보보호 상시평가**에서 관리·운영 실태를 증빙해야 합니다.
+기존 DLP 솔루션은 탐지·차단·마스킹까지만 지원하고, 그 이후의 규제 근거 정리와 소명자료 작성은 담당자 수작업에 의존합니다.
+특히 전문 보안 인력이 부족한 **중소 금융사(저축은행 등)**에는 큰 부담입니다.
+
+**ReguPilot은 "AI 사용 → 민감정보 탐지 → 조치 → 규제 매핑 → 증빙·보고서"를 하나의 흐름으로 묶었습니다.**
+그중 저는 이 흐름의 출발점인 **DLP 계층**, 즉 프롬프트가 외부 LLM에 도달하기 전 마지막 관문을 맡았습니다.
 
 - 정형화된 개인정보(주민번호, 계좌·카드번호 등)는 **마스킹하거나 차단**
 - 표현만 바꾼 기밀 요청(예: "전 직원 연봉 테이블 정리해줘")도 **의미 기반으로 탐지**
 - 프롬프트 인젝션·탈옥 시도 차단
-- 모든 탐지 결과를 감사 로그로 남겨 컴플라이언스 담당자가 조치
+- 모든 탐지 결과를 감사 로그(Audit Trail)로 남겨 이후 규제 매핑·증빙의 근거 데이터로 활용
 
 ---
 
 ## 2. 아키텍처
 
+**서비스 흐름 (DLP 중심)**
 ```
-브라우저 (React)
+브라우저 (React + Vite)
   └→ Node.js API (Express)  ── AI 채팅 요청
-        ① 입력 검사   → DLP 서비스 (FastAPI)  direction="input"
+        ① 입력 검사   → AI Security (FastAPI + Hybrid DLP)  direction="input"
         │               ├ 정규식 탐지: PII 5종 + 프롬프트 인젝션
         │               └ 임베딩 유사도 탐지: 기밀 카테고리 4종
         │               → allowed / masked / blocked 판정
-        ② blocked면 LLM 호출 생략, 아니면 마스킹본만 LLM(Solar)에 전달
-        ③ 응답 검사   → DLP 서비스        direction="output"
-        └→ usage_log / event_log / action_history 기록
+        ② blocked면 LLM 호출 생략, 아니면 마스킹본만 LLM(Amazon Bedrock)에 전달
+        ③ 응답 검사   → AI Security                         direction="output"
+        └→ usage_log / event_log / action_history 기록 (PostgreSQL)
                                   ↓
-                     컴플라이언스 담당자 "위험 이벤트 관리" 화면
+          위험 이벤트 관리 → 규제 조항 매핑 → 증빙자료·내부결재 보고서
 ```
+
+**클라우드 구성 (AWS)**
+- ALB → ECS Fargate (VPC Private Subnet)
+- IAM Task Role로 `InvokeModel`만 허용, VPC 엔드포인트를 통해 **승인된 Bedrock 모델만 호출**
+- 증빙 파일은 S3 버킷에 저장하고 presigned URL(5분)로만 접근
+- GitHub Actions(OIDC)로 서비스별 자동 배포
 
 **핵심 설계 결정**
 - **임베딩을 로컬에서만 계산**: `fastembed` + `multilingual-e5-large`. 민감정보를 검사하려고 외부 API로 보내면 DLP의 목적과 모순되기 때문입니다.
 - **입력과 출력 양방향 검사**: LLM이 참조 데이터를 그대로 뱉거나 환각으로 민감정보를 만들어내는 경우까지 막습니다.
 - **판정 3단계**: 의미가 살아 있는 정보는 마스킹하고, 마스킹해도 위험한 유형(주민번호, 인젝션, 기밀 유사도)은 항상 차단합니다.
 
-📄 [ERD 보기](docs/ERD.md)
 ---
 
 ## 3. 기술 스택
@@ -58,12 +69,16 @@
 | DLP 서비스 (담당) | Python, FastAPI, SQLAlchemy, fastembed (multilingual-e5-large), 정규식, unittest |
 | Backend | Node.js, Express, Sequelize |
 | Frontend | React, Vite |
-| DB / Infra | PostgreSQL (Neon), Docker, AWS ECS·ECR, GitHub Actions |
-| LLM | Upstage Solar |
+| DB / Infra | PostgreSQL, Docker, AWS (ECS Fargate, ECR, ALB, S3, VPC Endpoint), GitHub Actions |
+| LLM | Amazon Bedrock |
 
 ---
 
 ## 4. 내가 한 일
+
+### 🧭 팀장
+- 5인 팀을 이끌며 8주간 **회의 39회**를 진행하고 회의록으로 의사결정을 기록
+<!-- TODO: 팀장으로서 구체적으로 한 일 추가 (예: 역할 분담, 일정 관리, 코드 리뷰·병합 규칙, 갈등 조율 등) -->
 
 ### ① DLP 탐지 엔진 구현
 - PII 정규식 탐지(주민번호, 휴대폰, 계좌, 카드, 이메일) 및 마스킹
@@ -149,5 +164,5 @@
 <!-- TODO: 직접 작성. 예시 방향
 - 임계값을 "조정"하는 게 아니라, 왜 안 되는지 데이터로 증명하고 구조를 바꾼 경험
 - 정확도 하나가 아니라 오탐/미탐의 비용 차이를 고려해 판단한 경험
-- 6인 팀에서 공유 DB·병합 과정의 회귀 문제를 겪으며 배운 협업 방식
+- 팀장으로서 5인 팀의 공유 DB·병합 과정 회귀 문제를 겪으며 배운 협업 방식
 -->
