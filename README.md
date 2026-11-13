@@ -9,7 +9,7 @@
 > 원본 저장소(팀 Organization): [klllj7/financial-platform](https://github.com/klllj7/financial-platform)
 > 이 저장소는 커밋 기록을 유지한 미러이며, 아래 내용은 제가 담당한 DLP 파트를 중심으로 정리했습니다.
 
-<!-- 📸 대표 이미지: 1P 사업 솔루션 소개서 이미지, 또는 AI 채팅에서 마스킹/차단되는 장면 캡처 -->
+<img width="761" height="421" alt="빅프 7조 최종산출물" src="https://github.com/user-attachments/assets/7872973d-e5fc-431c-afd6-a214e70db1e0" />
 
 ---
 
